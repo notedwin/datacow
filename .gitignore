@@ -1,0 +1,8 @@
+.DS_Store
+.vscode
+.ipynb_checkpoints
+.env
+env.yml
+hosts
+__pycache__
+data_sink.py
