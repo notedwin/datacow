@@ -67,6 +67,41 @@ def normalize_raw(query, table_name, engine, json_column):
     logger.info(f"Inserted {row_inserted} rows into {table_name} table")
     return raw_data["id"].max() if raw_data.shape[0] > 0 else 0
 
+def dump_api_json(json, table_name, engine, inspector):
+    """
+    Get the lastest key from the table if it exists and add 1 to the key
+    Take json and dump into table
+    """
+    if not inspector.has_table(f"{table_name}"):
+        # create table schema
+        logger.info(f"Creating table {table_name}")
+        # need to make this dynamic by passing in the schema
+        # however there is not an easy way to enable primary key in sqlalchemy
+
+        engine.execute(
+            f"""CREATE TABLE {table_name} (
+            index SERIAL PRIMARY KEY NOT NULL,
+            date TIMESTAMP,
+            json JSONB
+            )"""
+        )
+    date = pd.to_datetime("today").strftime("%Y-%m-%d %H:%M:%S")
+    # take json and store it as a json column in postgres
+    data = pd.DataFrame({"date": [date], "json": [json]})
+    num_rows = data.to_sql(table_name, engine, if_exists="append", index=False)
+    logger.debug(f"Inserted {num_rows} rows into {table_name} table")
+    return num_rows
+
+def df_dump(df, table_name, engine, schema):
+    """
+    Get the lastest key from the table if it exists and add 1 to the key
+    Take json and dump into table
+    """
+    num_rows = df.to_sql(table_name, engine, if_exists="append", index=False, dtype=schema)
+    logger.debug(f"Inserted {num_rows} rows into {table_name} table")
+    return num_rows
+
+
 def get_ip_data(engine):
     df = pd.read_sql_query(
         """SELECT DISTINCT SUBSTR("request.headers.Cf-Connecting-Ip", 2, LENGTH("request.headers.Cf-Connecting-Ip") - 2) AS IP FROM caddy_fct
