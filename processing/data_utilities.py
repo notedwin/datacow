@@ -14,12 +14,13 @@ logger = logging.getLogger("etl.datautilities")
 def get_latest_row(table_name, engine, inspector):
     """ Get the latest row processed from metadata table corresponding to the table_name"""
     latest_row = 0
-    if inspector.has_table(f"{table_name}_metadata"):
-        logger.info(f"{table_name}_metadata table exists")
-        df = pd.read_sql_query(
-            f"select MAX(last_row) as num_row from {table_name}_metadata", con=engine
+    with engine.connect() as conn:
+        result = conn.execute(
+            f"SELECT MAX(last_row) AS num_row FROM {table_name}_metadata"
         )
-        latest_row = df["num_row"][0]
+        row = result.fetchone()
+        if row is not None and row["num_row"] is not None:
+            latest_row = row["num_row"]
     logger.info(f"Latest row processed was: {latest_row}")
     return latest_row
 
