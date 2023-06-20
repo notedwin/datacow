@@ -11,3 +11,5 @@ dagster.yaml
 .cache-notedwin
 data-cow/
 listening.json
+meta.sql
+soccer-spi/

@@ -35,7 +35,7 @@ engine = create_engine(os.getenv(key="DATABASE_URL"))
 # print(r)
 
 df = pd.read_sql_query(
-    """SELECT DISTINCT spotify_track_uri as uri FROM spotify_listening WHERE spotify_track_uri IS NOT NULL AND spotify_track_uri NOT IN (SELECT uri FROM audio_features)""",
+    """SELECT DISTINCT spotify_track_uri as uri FROM spotify_listening WHERE spotify_track_uri IS NOT NULL AND spotify_track_uri NOT IN (SELECT uri FROM audio_features)""",  # noqa: E501
     engine,
 )
 

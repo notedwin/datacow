@@ -1,7 +1,5 @@
 import cProfile
 import pstats
-import pyprof2calltree
-import websites_ip
 
 # run the profiler on the module
 cProfile.run('websites_ip.main()', 'my_module_stats')
