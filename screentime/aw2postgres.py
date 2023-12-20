@@ -2,6 +2,8 @@ from sqlalchemy import create_engine
 from sqlalchemy import inspect
 import os
 import sqlite3
+import sys
+sys.path.append("..")
 from data_utilities import sqlite2pg, get_latest_row, update_latest_row
 from dotenv import load_dotenv
 
