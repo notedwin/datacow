@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timedelta
 
 import duckdb
+import pandas as pd
 import requests
 from dotenv import find_dotenv, load_dotenv
 
@@ -32,34 +33,46 @@ def leetcode_data():
 
 
 def github_data():
-    yesterday = datetime.now().date() - timedelta(days=1)
-    yes_utz = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-    gh_query = """query {
-        viewer {
-            login
-            contributionsCollection {
-                startedAt: "{yes_utz}",
-                contributionCalendar {
-                    totalContributions
-                    weeks {
-                        contributionDays {
+    now_utz = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 365 to load everything then down to 7 for cron job
+    year_ago = datetime.now() - timedelta(days=7)
+    yes_utz = year_ago.strftime("%Y-%m-%dT%H:%M:%SZ")
+    gh_query = """query {{
+        user(login: "{0}"){{
+            contributionsCollection(
+                from: "{1}"
+                to: "{2}"        
+            ){{
+                contributionCalendar{{
+                    weeks{{
+                        contributionDays{{
                             contributionCount
                             date
-                        }
-                    }
-                }
-            }
-        }
-    }"""
-    res = requests.post(
-        gh_url,
-        json={"query": gh_query},
-        headers={"Authorization": f"bearer {gh_token}"},
-    )
-    print(res.json())
-    return res.json()["data"]["viewer"]["contributionsCollection"][
-        "contributionCalendar"
-    ]["weeks"]
+                        }}
+                    }}
+                }}
+            }}
+        }}
+    }}"""
+
+    data = {}
+
+    for user in ["notedwin", "notedwin-hznp"]:
+        q = gh_query.format(user, yes_utz, now_utz)
+        res = requests.post(
+            gh_url,
+            json={"query": q},
+            headers={"Authorization": f"bearer {gh_token}"},
+        )
+        contribs = res.json()["data"]["user"]["contributionsCollection"][
+            "contributionCalendar"
+        ]["weeks"]
+        for week in contribs:
+            for day in week["contributionDays"]:
+                date = day["date"]
+                count = day["contributionCount"]
+                data[date] = data.get(date, 0) + count
+    return data
 
 
 if __name__ == "__main__":
@@ -70,20 +83,15 @@ if __name__ == "__main__":
         print(date, count)
         contributions[date] = count
 
-    for item in github_data():
-        print(item)
-        contributions[item["date"]] = (
-            contributions.get(item["date"], 0) + item["contributionCount"]
-        )
+    data = github_data()
+    for date, count in data.items():
+        contributions[date] = contributions.get(date, 0) + count
 
-    print(contributions)
-    df = duckdb.from_dict(contributions)
-    print(df)
+    df = pd.DataFrame(contributions.items(), columns=["Date", "contributions"])
 
-
-# duckdb.execute(
-#     """
-#     INSERT INTO postgres.cloudflare_analytics
-#     SELECT date, contributions FROM contribution_calendar
-#     """
-# )
+    duckdb.execute(
+        """
+        INSERT INTO postgres.contribution_calendar
+        SELECT date, contributions FROM df
+        """
+    )
