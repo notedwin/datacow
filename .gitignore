@@ -18,3 +18,8 @@ output/
 Takeout/
 images/
 env.yml
+go/
+general/
+health/
+logs/
+prefect/
