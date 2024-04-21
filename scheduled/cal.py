@@ -1,26 +1,17 @@
-import json
-import os
 from datetime import datetime, timedelta
 
 import duckdb
 import pandas as pd
 import requests
-from dotenv import find_dotenv, load_dotenv
+import structlog
+from infisical_client import ClientSettings, GetSecretOptions, InfisicalClient
 
-load_dotenv(find_dotenv())
-
+log = structlog.get_logger()
 gh_url = "https://api.github.com/graphql"
 lc_url = "https://leetcode.com/graphql"
-gh_token = os.getenv("GH_TOKEN")
-db_url = os.getenv("DATABASE_URL")
-
-duckdb.execute("INSTALL postgres; LOAD postgres;")
-duckdb.execute(f"ATTACH 'postgres:{db_url}' AS postgres")
 
 
 def leetcode_data():
-    start = datetime.now().date() - timedelta(days=7)
-    end = datetime.now().date()
     lc_query = """query
     {
         matchedUser(username: "notedwin")
@@ -32,11 +23,16 @@ def leetcode_data():
     return res.json()["data"]["matchedUser"]["submissionCalendar"]
 
 
-def github_data():
+def github_data(gh_token):
+    last_date = duckdb.execute(
+        """
+        SELECT MAX(date) FROM postgres.contribution_calendar
+    """
+    ).fetchone()[0]
+    last_date = datetime.strptime(last_date, "%Y-%m-%d") - timedelta(days=30)
+    last_utz = last_date.strftime("%Y-%m-%dT%H:%M:%SZ")
     now_utz = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-    # 365 to load everything then down to 7 for cron job
-    year_ago = datetime.now() - timedelta(days=7)
-    yes_utz = year_ago.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     gh_query = """query {{
         user(login: "{0}"){{
             contributionsCollection(
@@ -58,7 +54,7 @@ def github_data():
     data = {}
 
     for user in ["notedwin", "notedwin-hznp"]:
-        q = gh_query.format(user, yes_utz, now_utz)
+        q = gh_query.format(user, last_utz, now_utz)
         res = requests.post(
             gh_url,
             json={"query": q},
@@ -75,15 +71,41 @@ def github_data():
     return data
 
 
-if __name__ == "__main__":
-    contributions = {}
-    data = json.loads(leetcode_data())
-    for date, count in data.items():
-        date = datetime.fromtimestamp(int(date)).strftime("%Y-%m-%d")
-        print(date, count)
-        contributions[date] = count
+def main():
+    client = InfisicalClient(
+        ClientSettings(
+            access_token="st.0f1fb32c-f2ad-429f-b3b8-bff539975f5f.1910ac88e175bc3ccee1f755d14e44cd.63938e0140a19371329eff95cb2a7cb0",
+            site_url="http://spark:8080",
+        )
+    )
 
-    data = github_data()
+    gh_token = client.getSecret(
+        options=GetSecretOptions(
+            environment="prod",
+            project_id="d62f85ea-2258-45ae-afa2-857ece8d8743",
+            secret_name="GH_TOKEN",
+        )
+    ).secret_value
+
+    db_url = client.getSecret(
+        options=GetSecretOptions(
+            environment="prod",
+            project_id="d62f85ea-2258-45ae-afa2-857ece8d8743",
+            secret_name="LOGS_DB",
+        )
+    ).secret_value
+
+    duckdb.execute("INSTALL postgres; LOAD postgres;")
+    duckdb.execute(f"ATTACH IF NOT EXISTS 'postgres:{db_url}' AS postgres")
+    contributions = {}
+    log.info(f"Github: Fetching contribution calendar update {datetime.now()}")
+    # data = json.loads(leetcode_data())
+    # for date, count in data.items():
+    #     date = datetime.fromtimestamp(int(date)).strftime("%Y-%m-%d")
+    #     print(date, count)
+    #     contributions[date] = count
+
+    data = github_data(gh_token)
     for date, count in data.items():
         contributions[date] = contributions.get(date, 0) + count
 
@@ -95,3 +117,9 @@ if __name__ == "__main__":
         SELECT date, contributions FROM df
         """
     )
+
+    log.info(f"Github: Inserted {len(data)} new rows")
+
+
+if __name__ == "__main__":
+    main()

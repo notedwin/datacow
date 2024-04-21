@@ -1,31 +1,15 @@
-import os
 from datetime import datetime, timedelta
 
 import duckdb
 import pandas as pd
 import requests
-from dotenv import find_dotenv, load_dotenv
-
-load_dotenv(find_dotenv())
+import structlog
+from infisical_client import ClientSettings, GetSecretOptions, InfisicalClient
 
 url = "https://api.cloudflare.com/client/v4/graphql/"
-api_token = os.getenv("CF_TOKEN")
-api_account = os.getenv("CF_ACCOUNT")
-db_url = os.getenv("DATABASE_URL")
-offset_days = 1
-historical_days = 14
 
 
-duckdb.execute("INSTALL postgres; LOAD postgres;")
-duckdb.execute(f"ATTACH 'postgres:{db_url}' AS postgres")
-
-
-def get_past_date(num_days):
-    today = datetime.utcnow().date()
-    return today - timedelta(days=num_days)
-
-
-def get_cf_graphql(start_date, end_date):
+def get_cf_graphql(start_date, end_date, api_token, api_account):
     assert start_date <= end_date
     headers = {
         "Content-Type": "application/json",
@@ -117,11 +101,55 @@ def get_cf_graphql(start_date, end_date):
     return r.json()
 
 
-if __name__ == "__main__":
-    start_date = get_past_date(offset_days + historical_days)
-    end_date = get_past_date(offset_days)
+def main():
+    log = structlog.get_logger()
 
-    req = get_cf_graphql(start_date, end_date)
+    client = InfisicalClient(
+        ClientSettings(
+            access_token="st.0f1fb32c-f2ad-429f-b3b8-bff539975f5f.1910ac88e175bc3ccee1f755d14e44cd.63938e0140a19371329eff95cb2a7cb0",
+            site_url="http://spark:8080",
+        )
+    )
+
+    db_url = client.getSecret(
+        options=GetSecretOptions(
+            environment="prod",
+            project_id="d62f85ea-2258-45ae-afa2-857ece8d8743",
+            secret_name="LOGS_DB",
+        )
+    ).secret_value
+
+    api_token = client.getSecret(
+        options=GetSecretOptions(
+            environment="prod",
+            project_id="d62f85ea-2258-45ae-afa2-857ece8d8743",
+            secret_name="CF_TOKEN",
+        )
+    ).secret_value
+
+    api_account = client.getSecret(
+        options=GetSecretOptions(
+            environment="prod",
+            project_id="d62f85ea-2258-45ae-afa2-857ece8d8743",
+            secret_name="CF_ACCOUNT",
+        )
+    ).secret_value
+
+    duckdb.execute("INSTALL postgres; LOAD postgres;")
+    duckdb.execute(f"ATTACH IF NOT EXISTS 'postgres:{db_url}' AS postgres")
+    last_date = duckdb.execute(
+        """
+        SELECT MAX(date) FROM postgres.cloudflare_analytics
+    """
+    ).fetchone()[0]
+    last_date = datetime.strptime(last_date, "%Y-%m-%d") - timedelta(days=1)
+    last_date = last_date.date()
+
+    today = datetime.utcnow().date()
+
+    log.info(f"Cloudflare: Fetching data from {last_date} to {today}")
+
+    req = get_cf_graphql(last_date, today, api_token, api_account)
 
     data = req["data"]["viewer"]["accounts"][0]["httpRequests1dGroups"]
 
@@ -142,9 +170,16 @@ if __name__ == "__main__":
             for row in data
         ]
     )
+
+    log.info(f"Cloudflare: Inserting {len(df)} rows")
+
     duckdb.execute(
         """
         INSERT INTO postgres.cloudflare_analytics
         SELECT * FROM df
         """
     )
+
+
+if __name__ == "__main__":
+    main()
