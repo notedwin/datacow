@@ -4,7 +4,7 @@ import duckdb
 import pandas as pd
 import requests
 import structlog
-from infisical_client import ClientSettings, GetSecretOptions, InfisicalClient
+from utils import get_secret
 
 url = "https://api.cloudflare.com/client/v4/graphql/"
 
@@ -104,36 +104,9 @@ def get_cf_graphql(start_date, end_date, api_token, api_account):
 def main():
     log = structlog.get_logger()
 
-    client = InfisicalClient(
-        ClientSettings(
-            access_token="st.0f1fb32c-f2ad-429f-b3b8-bff539975f5f.1910ac88e175bc3ccee1f755d14e44cd.63938e0140a19371329eff95cb2a7cb0",
-            site_url="http://spark:8080",
-        )
-    )
-
-    db_url = client.getSecret(
-        options=GetSecretOptions(
-            environment="prod",
-            project_id="d62f85ea-2258-45ae-afa2-857ece8d8743",
-            secret_name="LOGS_DB",
-        )
-    ).secret_value
-
-    api_token = client.getSecret(
-        options=GetSecretOptions(
-            environment="prod",
-            project_id="d62f85ea-2258-45ae-afa2-857ece8d8743",
-            secret_name="CF_TOKEN",
-        )
-    ).secret_value
-
-    api_account = client.getSecret(
-        options=GetSecretOptions(
-            environment="prod",
-            project_id="d62f85ea-2258-45ae-afa2-857ece8d8743",
-            secret_name="CF_ACCOUNT",
-        )
-    ).secret_value
+    db_url = get_secret("LOGS_DB")
+    api_token = get_secret("CF_TOKEN")
+    api_account = get_secret("CF_ACCOUNT")
 
     duckdb.execute("INSTALL postgres; LOAD postgres;")
     duckdb.execute(f"ATTACH IF NOT EXISTS 'postgres:{db_url}' AS postgres")
